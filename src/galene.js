@@ -29,7 +29,7 @@ async function createInviteToken(roomName, username, expiresInMs = 24 * 60 * 60 
   const expires = new Date(Date.now() + expiresInMs).toISOString();
   const res = await axios.post(
     `${groupApiUrl(roomName)}.tokens/`,
-    { expires, username },
+    { expires, username, permissions: ['present'] },
     { auth: AUTH }
   );
 
