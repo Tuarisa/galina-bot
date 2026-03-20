@@ -2,7 +2,6 @@
 
 Telegram-бот для управления видеокомнатами [Galène](https://galene.org).
 
-Бот живёт в Telegram как **@galinaaaa_bot** и управляет сервером `galene.uralproject.net:8443`.
 
 ## Команды
 
