@@ -12,6 +12,8 @@ const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 
 const ROOM_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 
+let botUsername = '';
+
 const dateFormatter = new Intl.DateTimeFormat('ru-RU', {
   day: '2-digit', month: '2-digit', year: 'numeric',
   hour: '2-digit', minute: '2-digit',
@@ -21,22 +23,65 @@ function formatDate(isoString) {
   return dateFormatter.format(new Date(isoString));
 }
 
+function isGroupChat(ctx) {
+  return ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+}
+
 // /start
-bot.start((ctx) =>
-  ctx.reply(
+bot.start((ctx) => {
+  if (isGroupChat(ctx)) {
+    return ctx.reply(
+      'Привет! Управляю видеокомнатами Galene для этого чата.\n\n' +
+        '/room [название] — создать комнату для чата (лимит: 2)\n' +
+        '/rooms — активные комнаты этого чата\n' +
+        '/invite [название] [имя] — ссылка-приглашение'
+    );
+  }
+  return ctx.reply(
     'Привет! Я управляю видеокомнатами Galene.\n\n' +
       '/room [название] — создать новую комнату\n' +
       '/rooms — список твоих активных комнат\n' +
       '/invite [название] [имя] — ссылка-приглашение для комнаты'
-  )
-);
+  );
+});
 
 // /room [alias] — создать комнату
 bot.command('room', async (ctx) => {
   const alias = ctx.message.text.split(/\s+/).slice(1).join(' ').trim() || generateAlias();
-  const userId = ctx.from.id;
 
-  // Если у пользователя уже MAX комнат — удаляем самую старую
+  if (isGroupChat(ctx)) {
+    const chatId = ctx.chat.id;
+    const oldest = storage.getOldestChatRoom(chatId);
+    if (oldest) {
+      try {
+        await galene.deleteRoom(oldest.name);
+        storage.removeRoom(oldest.name);
+      } catch (err) {
+        console.error('evict group room error:', err.message);
+      }
+    }
+    const roomName = randomUUID();
+    try {
+      const url = await galene.createRoom(roomName, alias);
+      storage.addRoom(roomName, url, ctx.from.id, alias, chatId);
+      await ctx.reply(
+        `Комната создана: *${alias}*\n\n🔗 ${url}`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            Markup.button.callback('🔗 Получить приглашение', `invite:${roomName}`),
+          ]),
+        }
+      );
+    } catch (err) {
+      console.error('createRoom error (group):', err.message);
+      await ctx.reply('Не удалось создать комнату. Проверьте настройки Galene.');
+    }
+    return;
+  }
+
+  // Личный чат
+  const userId = ctx.from.id;
   const oldest = storage.getOldestUserRoom(userId);
   if (oldest) {
     try {
@@ -46,7 +91,6 @@ bot.command('room', async (ctx) => {
       console.error('evict room error:', err.message);
     }
   }
-
   const roomName = randomUUID();
   try {
     const url = await galene.createRoom(roomName, alias);
@@ -66,7 +110,7 @@ bot.command('room', async (ctx) => {
   }
 });
 
-// Кнопка "Пригласить" — генерирует ссылку с рандомным именем
+// Кнопка "Пригласить" / "Получить приглашение"
 bot.action(/^invite:(.+)$/, async (ctx) => {
   const roomName = ctx.match[1];
   const room = storage.getRoomByName(roomName);
@@ -78,22 +122,42 @@ bot.action(/^invite:(.+)$/, async (ctx) => {
   const username = generateUsername();
   try {
     const inviteUrl = await galene.createInviteToken(roomName, username);
-    await ctx.answerCbQuery();
-    await ctx.reply(
-      `🔗 Приглашение для *${room.alias}*\nИмя: \`${username}\`\n\n${inviteUrl}`,
-      { parse_mode: 'Markdown' }
-    );
+    const message = `🔗 Приглашение для *${room.alias}*\nИмя: \`${username}\`\n\n${inviteUrl}`;
+
+    if (room.chatId) {
+      // Групповая комната — отправляем ссылку в личку нажавшему
+      try {
+        await ctx.telegram.sendMessage(ctx.from.id, message, { parse_mode: 'Markdown' });
+        await ctx.answerCbQuery('Ссылка отправлена в личные сообщения ✓');
+      } catch (err) {
+        if (err.code === 403) {
+          await ctx.answerCbQuery(
+            `Сначала напишите боту в личку: @${botUsername}`,
+            { show_alert: true }
+          );
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      // Личная комната — отвечаем в чат
+      await ctx.answerCbQuery();
+      await ctx.reply(message, { parse_mode: 'Markdown' });
+    }
   } catch (err) {
     console.error('invite button error:', err.message);
     await ctx.answerCbQuery('Не удалось создать ссылку', { show_alert: true });
   }
 });
 
-// /rooms — список комнат текущего пользователя
+// /rooms — список комнат
 bot.command('rooms', async (ctx) => {
-  const rooms = storage.getRoomsByUser(ctx.from.id);
+  const rooms = isGroupChat(ctx)
+    ? storage.getRoomsByChat(ctx.chat.id)
+    : storage.getRoomsByUser(ctx.from.id);
+
   if (rooms.length === 0) {
-    return ctx.reply('У тебя нет активных комнат.');
+    return ctx.reply(isGroupChat(ctx) ? 'У этого чата нет активных комнат.' : 'У тебя нет активных комнат.');
   }
   const lines = rooms.map(
     (r) => `• *${r.alias}* — создана ${formatDate(r.createdAt)}\n  ${r.url}`
@@ -109,7 +173,10 @@ bot.command('invite', async (ctx) => {
     return ctx.reply('Использование: /invite [название комнаты] [имя пользователя]');
   }
 
-  const room = storage.getRoomByAlias(alias, ctx.from.id);
+  const room = isGroupChat(ctx)
+    ? storage.getRoomByAliasInChat(alias, ctx.chat.id)
+    : storage.getRoomByAlias(alias, ctx.from.id);
+
   if (!room) {
     return ctx.reply(`Комната *${alias}* не найдена. Используйте /rooms для просмотра списка.`, {
       parse_mode: 'Markdown',
@@ -149,7 +216,10 @@ cron.schedule('0 * * * *', async () => {
 
 console.log('Бот запускается...');
 bot.launch();
-bot.telegram.getMe().then((me) => console.log(`Бот запущен: @${me.username}`));
+bot.telegram.getMe().then((me) => {
+  botUsername = me.username;
+  console.log(`Бот запущен: @${me.username}`);
+});
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
