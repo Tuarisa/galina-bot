@@ -6,6 +6,7 @@ const { randomUUID } = require('crypto');
 
 const galene = require('./galene');
 const storage = require('./storage');
+const { generateAlias } = require('./words');
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 
@@ -27,18 +28,13 @@ bot.start((ctx) =>
     'Привет! Я управляю видеокомнатами Galene.\n\n' +
       '/room [название] — создать новую комнату\n' +
       '/rooms — список твоих активных комнат\n' +
-      '/invite [название] — ссылка-приглашение для комнаты'
+      '/invite [название] [имя] — ссылка-приглашение для комнаты'
   )
 );
 
 // /room [alias] — создать комнату
 bot.command('room', async (ctx) => {
-  const alias = ctx.message.text.split(/\s+/).slice(1).join(' ').trim();
-
-  if (!alias) {
-    return ctx.reply('Укажите название комнаты: /room [название]');
-  }
-
+  const alias = ctx.message.text.split(/\s+/).slice(1).join(' ').trim() || generateAlias();
   const userId = ctx.from.id;
 
   // Если у пользователя уже MAX комнат — удаляем самую старую
@@ -78,12 +74,12 @@ bot.command('rooms', async (ctx) => {
   await ctx.reply(lines.join('\n\n'), { parse_mode: 'Markdown' });
 });
 
-// /invite [alias] — токен-приглашение
+// /invite [alias] [username] — токен-приглашение
 bot.command('invite', async (ctx) => {
-  const alias = ctx.message.text.split(/\s+/).slice(1).join(' ').trim();
+  const [alias, username] = ctx.message.text.split(/\s+/).slice(1);
 
-  if (!alias) {
-    return ctx.reply('Использование: /invite [название комнаты]');
+  if (!alias || !username) {
+    return ctx.reply('Использование: /invite [название комнаты] [имя пользователя]');
   }
 
   const room = storage.getRoomByAlias(alias, ctx.from.id);
@@ -94,9 +90,9 @@ bot.command('invite', async (ctx) => {
   }
 
   try {
-    const inviteUrl = await galene.createInviteToken(room.name, alias);
+    const inviteUrl = await galene.createInviteToken(room.name, username);
     await ctx.reply(
-      `Ссылка-приглашение для *${alias}* (действует 24 ч):\n\n🔗 ${inviteUrl}`,
+      `Ссылка-приглашение для *${alias}* (пользователь: ${username}, действует 24 ч):\n\n🔗 ${inviteUrl}`,
       { parse_mode: 'Markdown' }
     );
   } catch (err) {
