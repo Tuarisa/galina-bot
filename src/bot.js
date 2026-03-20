@@ -1,12 +1,12 @@
 require('dotenv').config();
 
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const cron = require('node-cron');
 const { randomUUID } = require('crypto');
 
 const galene = require('./galene');
 const storage = require('./storage');
-const { generateAlias } = require('./words');
+const { generateAlias, generateUsername } = require('./words');
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 
@@ -53,11 +53,39 @@ bot.command('room', async (ctx) => {
     storage.addRoom(roomName, url, userId, alias);
     await ctx.reply(
       `Комната создана: *${alias}*\n\n🔗 ${url}`,
-      { parse_mode: 'Markdown' }
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          Markup.button.callback('🔗 Пригласить', `invite:${roomName}`),
+        ]),
+      }
     );
   } catch (err) {
     console.error('createRoom error:', err.message);
     await ctx.reply('Не удалось создать комнату. Проверьте настройки Galene.');
+  }
+});
+
+// Кнопка "Пригласить" — генерирует ссылку с рандомным именем
+bot.action(/^invite:(.+)$/, async (ctx) => {
+  const roomName = ctx.match[1];
+  const room = storage.getRoomByName(roomName);
+
+  if (!room) {
+    return ctx.answerCbQuery('Комната не найдена или уже удалена', { show_alert: true });
+  }
+
+  const username = generateUsername();
+  try {
+    const inviteUrl = await galene.createInviteToken(roomName, username);
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      `🔗 Приглашение для *${room.alias}*\nИмя: \`${username}\`\n\n${inviteUrl}`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) {
+    console.error('invite button error:', err.message);
+    await ctx.answerCbQuery('Не удалось создать ссылку', { show_alert: true });
   }
 });
 

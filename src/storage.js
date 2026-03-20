@@ -27,7 +27,7 @@ function addRoom(name, url, userId, alias) {
   save();
 }
 
-function getRoom(name) {
+function getRoomByName(name) {
   return load()[name] || null;
 }
 
@@ -57,6 +57,6 @@ function getExpiredRooms(maxAgeMs) {
 }
 
 module.exports = {
-  addRoom, getRoomsByUser, getRoomByAlias, getOldestUserRoom, removeRoom, getExpiredRooms,
+  addRoom, getRoomByName, getRoomsByUser, getRoomByAlias, getOldestUserRoom, removeRoom, getExpiredRooms,
   MAX_ROOMS_PER_USER,
 };

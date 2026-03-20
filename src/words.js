@@ -28,4 +28,8 @@ function generateAlias() {
   return `${pick(colors)}-${pick(moods)}-${pick(produce)}`;
 }
 
-module.exports = { generateAlias };
+function generateUsername() {
+  return `${pick(colors)}-${pick(produce)}`;
+}
+
+module.exports = { generateAlias, generateUsername };
