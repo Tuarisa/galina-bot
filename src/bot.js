@@ -12,14 +12,13 @@ const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 
 const ROOM_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 
+const dateFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit', month: '2-digit', year: 'numeric',
+  hour: '2-digit', minute: '2-digit',
+});
+
 function formatDate(isoString) {
-  return new Date(isoString).toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return dateFormatter.format(new Date(isoString));
 }
 
 // /start

@@ -43,7 +43,7 @@ function getRoomByAlias(alias, userId) {
 function getOldestUserRoom(userId) {
   const rooms = getRoomsByUser(userId);
   if (rooms.length < MAX_ROOMS_PER_USER) return null;
-  return rooms.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0];
+  return rooms.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0];
 }
 
 function removeRoom(name) {
@@ -53,10 +53,10 @@ function removeRoom(name) {
 
 function getExpiredRooms(maxAgeMs) {
   const cutoff = Date.now() - maxAgeMs;
-  return Object.values(load()).filter(r => new Date(r.createdAt).getTime() < cutoff);
+  return Object.values(load()).filter(r => Date.parse(r.createdAt) < cutoff);
 }
 
 module.exports = {
-  addRoom, getRoom, getRoomsByUser, getRoomByAlias, getOldestUserRoom, removeRoom, getExpiredRooms,
+  addRoom, getRoomsByUser, getRoomByAlias, getOldestUserRoom, removeRoom, getExpiredRooms,
   MAX_ROOMS_PER_USER,
 };
