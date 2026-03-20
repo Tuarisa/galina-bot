@@ -1,6 +1,5 @@
 const axios = require('axios');
 
-// Read config once at module load (dotenv is applied before this module is required)
 const BASE_URL = process.env.GALENE_URL;
 const BASE_GROUP = process.env.GALENE_BASE_GROUP || 'public';
 const AUTH = {
@@ -8,40 +7,35 @@ const AUTH = {
   password: process.env.GALENE_PASSWORD,
 };
 
-function groupPath(roomName) {
-  return `${BASE_GROUP}/${roomName}`;
+function groupApiUrl(roomName) {
+  return `${BASE_URL}/galene-api/v0/.groups/${BASE_GROUP}/${roomName}/`;
 }
 
-function apiUrl(path) {
-  return `${BASE_URL}/api/group/${path}`;
-}
-
-async function createRoom(roomName) {
-  const gp = groupPath(roomName);
+async function createRoom(roomName, displayName) {
   await axios.put(
-    apiUrl(`${gp}/`),
-    { displayName: roomName, public: true, 'allow-recording': false },
+    groupApiUrl(roomName),
+    { displayName, public: true, 'allow-recording': false, presenter: [{}] },
     { auth: AUTH }
   );
-  return `${BASE_URL}/group/${gp}/`;
+  return `${BASE_URL}/group/${BASE_GROUP}/${roomName}/`;
 }
 
 async function deleteRoom(roomName) {
-  await axios.delete(apiUrl(`${groupPath(roomName)}/`), { auth: AUTH });
+  await axios.delete(groupApiUrl(roomName), { auth: AUTH });
 }
 
-async function createInviteToken(roomName, expiresInMs = 24 * 60 * 60 * 1000) {
-  const gp = groupPath(roomName);
+// username embedded in token so the join form is pre-filled — user only needs to click Join
+async function createInviteToken(roomName, username, expiresInMs = 24 * 60 * 60 * 1000) {
   const expires = new Date(Date.now() + expiresInMs).toISOString();
-
-  const { data } = await axios.post(
-    apiUrl(`${gp}/tokens/`),
-    { expires, permissions: { present: [''] } },
+  const res = await axios.post(
+    `${groupApiUrl(roomName)}.tokens/`,
+    { expires, username },
     { auth: AUTH }
   );
 
-  if (!data.token) throw new Error(`Unexpected token response: ${JSON.stringify(data)}`);
-  return `${BASE_URL}/group/${gp}/?token=${data.token}`;
+  const token = res.headers['location'];
+  if (!token) throw new Error('No token in Location header');
+  return `${BASE_URL}/group/${BASE_GROUP}/${roomName}/?token=${token}`;
 }
 
 module.exports = { createRoom, deleteRoom, createInviteToken };

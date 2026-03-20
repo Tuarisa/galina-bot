@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const { Telegraf } = require('telegraf');
 const cron = require('node-cron');
-const { randomBytes } = require('crypto');
+const { randomUUID } = require('crypto');
 
 const galene = require('./galene');
 const storage = require('./storage');
@@ -10,10 +10,6 @@ const storage = require('./storage');
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 
 const ROOM_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
-
-function generateRoomName() {
-  return 'room-' + randomBytes(3).toString('hex');
-}
 
 function formatDate(isoString) {
   return new Date(isoString).toLocaleString('ru-RU', {
@@ -29,20 +25,39 @@ function formatDate(isoString) {
 bot.start((ctx) =>
   ctx.reply(
     'Привет! Я управляю видеокомнатами Galene.\n\n' +
-      '/room — создать новую комнату\n' +
-      '/rooms — список активных комнат\n' +
+      '/room [название] — создать новую комнату\n' +
+      '/rooms — список твоих активных комнат\n' +
       '/invite [название] — ссылка-приглашение для комнаты'
   )
 );
 
-// /room — создать комнату
+// /room [alias] — создать комнату
 bot.command('room', async (ctx) => {
-  const roomName = generateRoomName();
+  const alias = ctx.message.text.split(/\s+/).slice(1).join(' ').trim();
+
+  if (!alias) {
+    return ctx.reply('Укажите название комнаты: /room [название]');
+  }
+
+  const userId = ctx.from.id;
+
+  // Если у пользователя уже MAX комнат — удаляем самую старую
+  const oldest = storage.getOldestUserRoom(userId);
+  if (oldest) {
+    try {
+      await galene.deleteRoom(oldest.name);
+      storage.removeRoom(oldest.name);
+    } catch (err) {
+      console.error('evict room error:', err.message);
+    }
+  }
+
+  const roomName = randomUUID();
   try {
-    const url = await galene.createRoom(roomName);
-    storage.addRoom(roomName, url);
+    const url = await galene.createRoom(roomName, alias);
+    storage.addRoom(roomName, url, userId, alias);
     await ctx.reply(
-      `Комната создана: *${roomName}*\n\n🔗 ${url}`,
+      `Комната создана: *${alias}*\n\n🔗 ${url}`,
       { parse_mode: 'Markdown' }
     );
   } catch (err) {
@@ -51,38 +66,37 @@ bot.command('room', async (ctx) => {
   }
 });
 
-// /rooms — список активных комнат
+// /rooms — список комнат текущего пользователя
 bot.command('rooms', async (ctx) => {
-  const rooms = storage.getAllRooms();
+  const rooms = storage.getRoomsByUser(ctx.from.id);
   if (rooms.length === 0) {
-    return ctx.reply('Нет активных комнат.');
+    return ctx.reply('У тебя нет активных комнат.');
   }
   const lines = rooms.map(
-    (r) => `• *${r.name}* — создана ${formatDate(r.createdAt)}\n  ${r.url}`
+    (r) => `• *${r.alias}* — создана ${formatDate(r.createdAt)}\n  ${r.url}`
   );
   await ctx.reply(lines.join('\n\n'), { parse_mode: 'Markdown' });
 });
 
-// /invite [название] — токен-приглашение
+// /invite [alias] — токен-приглашение
 bot.command('invite', async (ctx) => {
-  const args = ctx.message.text.split(' ').slice(1);
-  const roomName = args[0];
+  const alias = ctx.message.text.split(/\s+/).slice(1).join(' ').trim();
 
-  if (!roomName) {
+  if (!alias) {
     return ctx.reply('Использование: /invite [название комнаты]');
   }
 
-  const room = storage.getRoom(roomName);
+  const room = storage.getRoomByAlias(alias, ctx.from.id);
   if (!room) {
-    return ctx.reply(`Комната *${roomName}* не найдена. Используйте /rooms для просмотра списка.`, {
+    return ctx.reply(`Комната *${alias}* не найдена. Используйте /rooms для просмотра списка.`, {
       parse_mode: 'Markdown',
     });
   }
 
   try {
-    const inviteUrl = await galene.createInviteToken(roomName);
+    const inviteUrl = await galene.createInviteToken(room.name, alias);
     await ctx.reply(
-      `Ссылка-приглашение для *${roomName}* (действует 24 ч):\n\n🔗 ${inviteUrl}`,
+      `Ссылка-приглашение для *${alias}* (действует 24 ч):\n\n🔗 ${inviteUrl}`,
       { parse_mode: 'Markdown' }
     );
   } catch (err) {
@@ -102,15 +116,17 @@ cron.schedule('0 * * * *', async () => {
       try {
         await galene.deleteRoom(room.name);
         storage.removeRoom(room.name);
-        console.log(`[cron] Удалена комната: ${room.name}`);
+        console.log(`[cron] Удалена комната: ${room.alias} (${room.name})`);
       } catch (err) {
-        console.error(`[cron] Ошибка удаления ${room.name}:`, err.message);
+        console.error(`[cron] Ошибка удаления ${room.alias}:`, err.message);
       }
     })
   );
 });
 
-bot.launch().then(() => console.log('Бот запущен'));
+console.log('Бот запускается...');
+bot.launch();
+bot.telegram.getMe().then((me) => console.log(`Бот запущен: @${me.username}`));
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

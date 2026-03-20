@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_FILE = path.join(__dirname, '..', 'data', 'rooms.json');
+const MAX_ROOMS_PER_USER = 3;
 
 // In-memory cache — loaded once on first access, written through on every mutation
 let cache = null;
@@ -20,8 +21,9 @@ function save() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(cache, null, 2));
 }
 
-function addRoom(name, url) {
-  load()[name] = { name, url, createdAt: new Date().toISOString() };
+// name = UUID (internal Galene room id), alias = user-facing label
+function addRoom(name, url, userId, alias) {
+  load()[name] = { name, url, userId, alias, createdAt: new Date().toISOString() };
   save();
 }
 
@@ -29,8 +31,19 @@ function getRoom(name) {
   return load()[name] || null;
 }
 
-function getAllRooms() {
-  return Object.values(load());
+function getRoomsByUser(userId) {
+  return Object.values(load()).filter(r => r.userId === userId);
+}
+
+function getRoomByAlias(alias, userId) {
+  return Object.values(load()).find(r => r.alias === alias && r.userId === userId) || null;
+}
+
+// Returns the oldest room to evict if user is at the limit, otherwise null
+function getOldestUserRoom(userId) {
+  const rooms = getRoomsByUser(userId);
+  if (rooms.length < MAX_ROOMS_PER_USER) return null;
+  return rooms.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0];
 }
 
 function removeRoom(name) {
@@ -40,7 +53,10 @@ function removeRoom(name) {
 
 function getExpiredRooms(maxAgeMs) {
   const cutoff = Date.now() - maxAgeMs;
-  return getAllRooms().filter(r => new Date(r.createdAt).getTime() < cutoff);
+  return Object.values(load()).filter(r => new Date(r.createdAt).getTime() < cutoff);
 }
 
-module.exports = { addRoom, getRoom, getAllRooms, removeRoom, getExpiredRooms };
+module.exports = {
+  addRoom, getRoom, getRoomsByUser, getRoomByAlias, getOldestUserRoom, removeRoom, getExpiredRooms,
+  MAX_ROOMS_PER_USER,
+};
