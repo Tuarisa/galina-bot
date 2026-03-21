@@ -119,6 +119,9 @@ bot.action(/^invite:(.+)$/, async (ctx) => {
     return ctx.answerCbQuery('Комната не найдена или уже удалена', { show_alert: true });
   }
 
+  // Отвечаем немедленно, чтобы не превысить 10-секундный таймаут Telegram
+  await ctx.answerCbQuery(room.chatId ? 'Генерирую ссылку...' : '');
+
   const username = generateUsername();
   try {
     const inviteUrl = await galene.createInviteToken(roomName, username);
@@ -128,12 +131,10 @@ bot.action(/^invite:(.+)$/, async (ctx) => {
       // Групповая комната — отправляем ссылку в личку нажавшему
       try {
         await ctx.telegram.sendMessage(ctx.from.id, message, { parse_mode: 'Markdown' });
-        await ctx.answerCbQuery('Ссылка отправлена в личные сообщения ✓');
       } catch (err) {
         if (err.code === 403) {
-          await ctx.answerCbQuery(
-            `Сначала напишите боту в личку: @${botUsername}`,
-            { show_alert: true }
+          await ctx.reply(
+            `@${ctx.from.username ? '@' + ctx.from.username : ctx.from.first_name}, напишите боту в личку: @${botUsername}`
           );
         } else {
           throw err;
@@ -141,12 +142,11 @@ bot.action(/^invite:(.+)$/, async (ctx) => {
       }
     } else {
       // Личная комната — отвечаем в чат
-      await ctx.answerCbQuery();
       await ctx.reply(message, { parse_mode: 'Markdown' });
     }
   } catch (err) {
     console.error('invite button error:', err.message);
-    await ctx.answerCbQuery('Не удалось создать ссылку', { show_alert: true });
+    await ctx.reply('Не удалось создать ссылку-приглашение.');
   }
 });
 
