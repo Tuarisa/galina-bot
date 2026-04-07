@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_FILE = path.join(__dirname, '..', 'data', 'rooms.json');
+
+fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+
 const MAX_ROOMS_PER_USER = 3;
 const MAX_ROOMS_PER_CHAT = 2;
 
